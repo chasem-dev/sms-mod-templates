@@ -5,7 +5,7 @@ They are built with the [mod SDK](https://github.com/chasem-dev/sms-mod-sdk), wh
 
 ![The four examples running together in Bianco Hills](docs/images/all-examples.jpg)
 
-*All four examples at once. The trainer HUD's panel (top left) and its landing ring under Mario, the stage timer under it, hello at the bottom left, and a Lua challenge (top right) just completed. They share the screen because each asks the game for a place (`hud_slot`) instead of picking one.*
+*All four examples at once: the trainer HUD's panel (top left) and its landing ring under Mario, the stage timer under it, hello at the bottom left, and a Lua challenge (top right) just completed. They share the screen because each asks the game for a place (`hud_slot`) instead of picking one.*
 
 ## Templates
 
@@ -17,33 +17,20 @@ Copy a template's folder out as a repository of your own. Each builds on its own
 | [`templates/c`](templates/c) | A native mod in C. |
 | [`templates/lua`](templates/lua) | A Lua script mod: a `mod.ini` and a `main.lua`, nothing to build. Runs in the [lua mod](https://github.com/chasem-dev/sms-mod-sdk#the-lua-mod). |
 
-All three start as the same small mod, so they can be compared side by side. It shows Mario's speed in a panel at the bottom right while a stage is played, has a key that hides it (P, O and U respectively), and has a switch in the Mods menu.
-
-<img src="templates/cpp/docs/screenshot.jpg" alt="The C++ template's speed panel while Mario runs" width="640">
+All three start as the same small mod, so they can be compared side by side. It shows Mario's speed in a panel at the bottom right while a stage is played, has a key that hides it (P, O and U respectively), and has a switch in the Mods menu. Each template's README has a picture.
 
 In a template, `mod/` is what ships (`mod.ini` and any images or data) and `src/` is what is built.
 
 ## Examples
 
-### [hello](examples/hello) (C++)
+Complete mods to read and borrow from. Each folder has a README with a picture of the mod running, and is laid out like a template: `mod/` ships, `src/` is built.
 
-The smallest useful mod. It names the stage as it loads and counts the coins taken in it, in a panel at the bottom left. H hides it, and so does its switch in the Mods menu.
-
-<img src="docs/images/hello.jpg" alt="hello's panel at the bottom left" width="640">
-
-### [trainer-hud](examples/trainer-hud) (C) and [stage-timer](examples/stage-timer) (C)
-
-**trainer-hud** uses most of the API. It has a panel with Mario's speed, position, health, water and status, plus a speed graph. In the world it draws a trail behind Mario and a ring where he will land. It also has coin pop-ups, a stage banner, a field-of-view setting, invincibility (it cancels damage events) and a moon jump (hold M). F3 shows or hides the panel.
-
-**stage-timer** is made to sit beside it. Its timer panel stacks under the trainer HUD's (`after = trainer-hud` in its `mod.ini`). It records Shine splits and best times (kept in its settings), and counts hits at `MONITOR` priority, so a hit the trainer HUD cancelled doesn't count. It also sends a custom event, `stage-timer.split`, that other mods can hear. F4 resets it.
-
-<img src="docs/images/trainer-hud-stage-timer.jpg" alt="The trainer HUD's panel with its speed graph, the ring where Mario will land and his trail (the line toward the camera), and the stage timer under the panel, while Mario jumps" width="640">
-
-### [lua-challenges](examples/lua-challenges) (Lua)
-
-A challenge against the clock each time a stage loads: collect coins, take no damage, climb, run a distance or stay in the air. It shows a panel with a progress bar, marks targets in the world, plays the game's sounds when you win or lose, and keeps your best streak. R picks another challenge. It shows Lua's `sms.on`, `sms.draw`, options and `require`, and it reads the C stage-timer's `stage-timer.split` event with `string.unpack`.
-
-<img src="docs/images/lua-challenges.jpg" alt="A Marathon challenge most of the way done, at the top right" width="640">
+| | |
+| --- | --- |
+| [`examples/hello`](examples/hello) | **C++**, the smallest useful mod: names the stage as it loads and counts the coins taken in it, in a panel at the bottom left. |
+| [`examples/trainer-hud`](examples/trainer-hud) | **C**, most of the API: a panel of Mario's speed, position, health and water with a speed graph, a trail and a landing ring in the world, coin pop-ups, a field-of-view setting, invincibility and a moon jump. |
+| [`examples/stage-timer`](examples/stage-timer) | **C**, made to sit beside others: an in-game timer with Shine splits, best times and hits taken, whose panel stacks under the trainer HUD's, and a custom event other mods hear. |
+| [`examples/lua-challenges`](examples/lua-challenges) | **Lua**: a challenge against the clock each time a stage loads, with a panel, world markers, the game's sounds and a best streak; it reads the C stage timer's event. |
 
 ## The Mods menu
 

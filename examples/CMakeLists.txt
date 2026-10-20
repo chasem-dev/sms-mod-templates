@@ -1,7 +1,8 @@
 # The examples (built from the top-level CMakeLists.txt, which gets the SDK).
-sms_add_mod(hello hello/hello.cpp)
-sms_add_mod(trainer-hud trainer-hud/trainer_hud.c)
-sms_add_mod(stage-timer stage-timer/stage_timer.c)
+# Each is laid out as a template is: mod/ ships, src/ is built.
+sms_add_mod(hello/mod hello/src/hello.cpp)
+sms_add_mod(trainer-hud/mod trainer-hud/src/trainer_hud.c)
+sms_add_mod(stage-timer/mod stage-timer/src/stage_timer.c)
 if(NOT WIN32)
   target_link_libraries(smsmod_trainer_hud PRIVATE m)
 endif()
@@ -15,4 +16,4 @@ foreach(t smsmod_hello smsmod_trainer_hud smsmod_stage_timer)
 endforeach()
 
 # Lua script mods: nothing to build
-sms_add_script_mod(lua-challenges)
+sms_add_script_mod(lua-challenges/mod)
