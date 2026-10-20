@@ -19,14 +19,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux libraries are built on Ubuntu 22.04, so they load on glibc
+          # 2.35 and newer (a newer one, as on ubuntu-24.04, would make them
+          # need it: fmod@GLIBC_2.38)
           - platform: linux-x86_64
             os: ubuntu-24.04
+            container: ubuntu:22.04
           - platform: linux-x86
             os: ubuntu-24.04
+            container: ubuntu:22.04
             cmake: -DSMS_MOD_ARCH=32
             apt: gcc-multilib g++-multilib
           - platform: linux-arm64
             os: ubuntu-24.04-arm
+            container: ubuntu:22.04
           - platform: windows-x86_64
             os: windows-2025
             cmake: -A x64
@@ -40,10 +46,16 @@ jobs:
             os: macos-15-intel
             cmake: -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15
     runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
     steps:
+      - if: matrix.container
+        name: Tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential git ca-certificates python3-pip zip ${{ matrix.apt }}
+          pip3 install cmake
       - uses: actions/checkout@v4
-      - if: matrix.apt
-        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.apt }}
       - name: Build
         shell: bash
         run: |

@@ -22,5 +22,5 @@ With `SMS_NATIVE_MODS_HOT=1` the running game loads the mod again each time you 
 
 ## Release
 
-Push a tag (`git tag v1.0.0 && git push --tags`): the workflow in [`.github/workflows/build.yml`](.github/workflows/build.yml) builds the mod for Windows (32- and 64-bit), Linux (32- and 64-bit x86, arm64) and macOS (Apple Silicon and Intel), and releases one zip holding `my-c-mod/` with a library for each. Players unzip it into the game's `mods/` folder.
+Push a tag (`git tag v1.0.0 && git push --tags`): the workflow in [`.github/workflows/build.yml`](.github/workflows/build.yml) builds the mod for Windows (32- and 64-bit), Linux (32- and 64-bit x86, arm64) and macOS (Apple Silicon and Intel; Linux on Ubuntu 22.04, so the libraries load on glibc 2.35 and newer), and releases one zip holding `my-c-mod/` with a library for each. Players unzip it into the game's `mods/` folder.
 Every push and pull request builds all of them too.
