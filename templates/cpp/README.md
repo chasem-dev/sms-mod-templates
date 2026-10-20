@@ -3,6 +3,10 @@
 A template for a native mod for the [Super Mario Sunshine PC port](https://github.com/chasem-dev/sms-pc-port), in C++.
 As it is, it shows Mario's speed in a panel at the bottom right while a stage is played; P hides it, and so does its switch in the Mods menu (F1).
 
+![The C++ template as it is: Mario's speed in a panel at the bottom right while he runs](docs/screenshot.jpg)
+
+*The template as it is, running alone in Bianco Hills. The panel takes its place with `hud_slot`, so other mods' panels there stack with it instead of overlapping. The speed is Mario's horizontal velocity in units a second.*
+
 ## Make it yours
 
 1. Copy this folder out as a repository of your own (from [sms-mod-templates](https://github.com/chasem-dev/sms-mod-templates): `templates/cpp`).
