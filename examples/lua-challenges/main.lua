@@ -5,7 +5,8 @@
 -- plays the game's sounds when it is won or lost, and keeps the best streak
 -- in its settings. R (key.reroll in its settings) picks another one.
 --
--- It shows the Lua side of the mod API (docs/MODDING.md, "Lua scripts"):
+-- It shows the Lua side of the mod API (the SDK manual's "Lua scripts",
+-- https://github.com/chasem-dev/sms-mod-sdk/blob/main/docs/MODDING.md#lua-scripts):
 -- events with sms.on, drawing with sms.draw, settings and options for the
 -- Mods menu, a key binding, require() for a module of its own, watching
 -- damage at MONITOR priority, and reading the C stage-timer mod's custom
