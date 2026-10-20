@@ -32,6 +32,7 @@ Complete mods to read and borrow from. Each folder has a README with a picture o
 | [`examples/stage-timer`](examples/stage-timer) | **C**, made to sit beside others: an in-game timer with Shine splits, best times and hits taken, whose panel stacks under the trainer HUD's, and a custom event other mods hear. |
 | [`examples/lua-challenges`](examples/lua-challenges) | **Lua**: a challenge against the clock each time a stage loads, with a panel, world markers, the game's sounds and a best streak; it reads the C stage timer's event. |
 | [`examples/squid-race`](examples/squid-race) | **C, a server mod**: a race round Ricco Harbor's Blooper course for everyone who joins a multiplayer game, run by the host alone; players join with the plain game. |
+| [`examples/lua-red-light`](examples/lua-red-light) | **Lua, a server mod**: Red Light, Green Light for everyone in a multiplayer game; anyone the server sees moving on red goes back to the start. |
 
 ## The Mods menu
 

@@ -19,3 +19,4 @@ endforeach()
 
 # Lua script mods: nothing to build
 sms_add_script_mod(lua-challenges/mod)
+sms_add_script_mod(lua-red-light/mod)
