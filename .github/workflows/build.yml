@@ -1,0 +1,121 @@
+# Builds every example and template for every platform the game runs on, and
+# each template on its own as a copy of it would build. On a tag (v*) it
+# releases the examples as one zip, ready to unzip into the game's mods/.
+
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            os: ubuntu-24.04
+          - platform: linux-x86
+            os: ubuntu-24.04
+            cmake: -DSMS_MOD_ARCH=32
+            apt: gcc-multilib g++-multilib
+          - platform: linux-arm64
+            os: ubuntu-24.04-arm
+          - platform: windows-x86_64
+            os: windows-2025
+            cmake: -A x64
+          - platform: windows-x86
+            os: windows-2025
+            cmake: -A Win32
+          - platform: macos-arm64
+            os: macos-15
+            cmake: -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          - platform: macos-x86_64
+            os: macos-15-intel
+            cmake: -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: matrix.apt
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.apt }}
+      - name: Build
+        shell: bash
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSMS_MODS_OUT="$PWD/out" ${{ matrix.cmake }}
+          cmake --build build --config Release --parallel
+          find out -type f
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mod-${{ matrix.platform }}
+          path: out
+          if-no-files-found: error
+
+  # Each template as someone copying it out would build it: on its own,
+  # fetching the SDK from GitHub at its tag.
+  templates:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        template: [c, cpp, lua]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build on its own
+        run: |
+          cp -R templates/${{ matrix.template }} "$RUNNER_TEMP/mine"
+          cd "$RUNNER_TEMP/mine"
+          cmake -S . -B build -DSMS_MODS_OUT="$PWD/out"
+          cmake --build build
+          find out -type f
+          test -f out/*/mod.ini
+
+  # One zip with every example and template, every platform's library in each.
+  package:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mod-*
+          path: parts
+      - name: Zip
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF_TYPE" == tag ]] || version="0.0.0-${GITHUB_SHA::7}"
+          mkdir -p out
+          for d in parts/mod-*; do cp -R "$d"/. out/; done
+          for b in out/*/bin; do
+            echo "$b: $(ls "$b" | tr '\n' ' ')"
+            test "$(ls "$b" | wc -l)" -eq 7
+          done
+          zip="sms-mod-examples-$version.zip"
+          (cd out && zip -r -X "../$zip" .)
+          echo "zip=$zip" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-zip
+          path: ${{ env.zip }}
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-zip
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" ./*.zip --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes "The examples and templates, built for every platform: unzip into the game's mods/ folder. The Lua ones need the lua mod: https://github.com/chasem-dev/sms-mod-sdk/releases"
