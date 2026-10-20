@@ -1,0 +1,44 @@
+# Checks the scripts compile, and on a tag (v1.0.0, ...) releases the mod as
+# a zip holding <id>/, which players unzip into the game's mods/ folder (with
+# the lua mod installed: https://github.com/chasem-dev/sms-mod-sdk/releases).
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the scripts
+        run: |
+          sudo apt-get update && sudo apt-get install -y lua5.4
+          find mod -name '*.lua' -print -exec luac5.4 -p {} +
+      - name: Zip
+        run: |
+          id=$(sed -n 's/^[[:space:]]*id[[:space:]]*=[[:space:]]*//p' mod/mod.ini | head -1 | tr -d '\r')
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF_TYPE" == tag ]] || version="0.0.0-${GITHUB_SHA::7}"
+          mkdir -p "out/$id" && cp -R mod/. "out/$id/"
+          zip="$id-$version.zip"
+          (cd out && zip -r -X "../$zip" "$id")
+          echo "zip=$zip" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-zip
+          path: ${{ env.zip }}
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$zip" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes "Unzip into the game's mods/ folder. Needs the lua mod: https://github.com/chasem-dev/sms-mod-sdk/releases"
