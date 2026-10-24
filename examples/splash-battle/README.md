@@ -12,9 +12,9 @@ It is a **server mod** (`side = server` in its `mod.ini`): it runs on the host o
 
 *His meter empty: thrown back onto the sand, as Shadow Mario falls when his is. Two seconds later everyone watches the winner.*
 
-![Ana's game near the end of a round: the arena's red edge drawn on the sand, closed in round her and Bo](docs/arena.jpg)
+![Ana's game near the end of a round: the arena's red edge drawn on the sand among the palms, closed in round her](docs/arena.jpg)
 
-*The arena's edge, a red line on the sand: nobody gets past it, and over the round it closes in, pushing everyone before it.*
+*The arena's edge, a red line on the sand: nobody gets past it, and over the round it closes in, pushing everyone before it. The arena is inland, on the beach's widest stretch of sand, clear of the sea.*
 
 ![Bo's game: "+35% water" at the top, WATER markers over pickups across the beach, FLUDD's gauge part full](docs/pickup.jpg)
 
@@ -28,7 +28,7 @@ It is a **server mod** (`side = server` in its `mod.ini`): it runs on the host o
 
 | | What players see | What the server does |
 | --- | --- | --- |
-| **Lobby** | "waiting for players (1 of 2 here)", free to play inside the red edge | counts the players in the arena; the stage's enemies are hidden and its Shines gone, and nobody can leave the arena: its edge (`SMS_CMD_BOUNDS`) is drawn on the ground round where the stage starts its players |
+| **Lobby** | "waiting for players (1 of 2 here)", free to play inside the red edge | counts the players in the arena; the stage's enemies are hidden and its Shines gone, and nobody can leave the arena: its edge (`SMS_CMD_BOUNDS`) is drawn on the ground round its middle, inland, and every player arriving is put inside it (`net->set_respawn`), not out where the stage starts them |
 | **Countdown** | "SPLASH BATTLE IN 8", the clock counting down | three seconds before the start: everyone onto a ring round the arena's middle, facing it, held; a third of a tank each, FLUDD using water three times as fast, the spray nozzle |
 | **Battle** | "Ready... Go!", Shadow Mario's chase music, the clock counting down from the time limit; a board of everyone's meter | water hits the other players (`SMS_RULE_WATER_HITS`); each drop that hits takes one off the meter; players collide; FLUDD fills up only from the pickups (`SMS_RULE_NO_REFILL`) |
 | **Water** | WATER markers round the arena; "+35% water" for whoever reaches one | five pickups at random spots on dry ground inside the edge; the first player there gets a share of a tank (`SMS_PLAYER_ADD_WATER`); each comes back somewhere else 40 seconds later |
@@ -50,7 +50,8 @@ On the host: its Mods menu (F1), or `settings.ini` in the mod's data folder.
 | **Water meter** (`meter`) | 300 drops: about three seconds of a spray held on someone close by |
 | **Time limit** (`time_limit`) | 180 seconds |
 | **Winner shown** (`winner_seconds`) | 10 seconds |
-| **Arena's edge** (`zone_radius`) | 3000 units from the middle |
+| **Arena's middle** (`middle_x`, `middle_z`) | 1800, 2800: Gelato Beach's widest stretch of sand, inland (3800 units of beach round it, 800 from the sea). 0, 0: where the stage starts its players |
+| **Arena's edge** (`zone_radius`) | 3600 units from the middle |
 | **The arena closes in** (`zone`), **to** (`zone_end`) | on, to 600 units |
 | **FLUDD fills up by itself** (`refill`) | off: only from the pickups |
 | **Water at the start** (`start_water`), **water use** (`water_use`) | 30% of a tank; 300% of FLUDD's own rate (a full tank sprays for about half a minute) |

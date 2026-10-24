@@ -76,6 +76,7 @@ static double decided_at;      /* the round's last fall: the winner is called a 
 
 static SmsVec3 middle;         /* the arena's middle: where the stage starts its players */
 static int have_middle;
+static int edge_out;           /* the edge is out for this session, and players are brought inside it */
 static float zone_radius;      /* the arena's edge as last sent */
 static int zone_closing;       /* the closing glide is out */
 
@@ -110,7 +111,7 @@ static int full_meter(void) { return api->config->get_int(self, "meter", 300); }
 static double limit_s(void) { return api->config->get_int(self, "time_limit", 180); }
 static double show_s(void) { return api->config->get_int(self, "winner_seconds", 10); }
 static int zone_on(void) { return api->config->get_int(self, "zone", 1); }
-static float zone_start(void) { return (float)api->config->get_int(self, "zone_radius", 3000); }
+static float zone_start(void) { return (float)api->config->get_int(self, "zone_radius", 3600); }
 static float zone_end(void) { return (float)api->config->get_int(self, "zone_end", 600); }
 static int refill_on(void) { return api->config->get_int(self, "refill", 0); }
 static int start_water(void) { return api->config->get_int(self, "start_water", 30); }
@@ -120,6 +121,11 @@ static int pickup_water(void) { return api->config->get_int(self, "pickup_water"
 static double pickup_cooldown(void) { return api->config->get_int(self, "pickup_cooldown", 40); }
 static int collide_on(void) { return api->config->get_int(self, "collision", 1); }
 static int arena_area(void) { return api->config->get_int(self, "area", 4); }
+/* the arena's middle on the map: on Gelato Beach's sand, its widest stretch
+   (round it, 3800 units of beach and dunes, 800 from the sea); 0, 0: where
+   the stage starts its players */
+static int middle_x(void) { return api->config->get_int(self, "middle_x", 1800); }
+static int middle_z(void) { return api->config->get_int(self, "middle_z", 2800); }
 static int arena_episode(void) { return api->config->get_int(self, "episode", 0); }
 
 static double now(void) { return api->core->time(); }
@@ -653,6 +659,8 @@ static int to_watch(int slot)
 	return -1;
 }
 
+static void arrive_inside(int slot, int now);
+
 /* ------------------------------------------------------------------ each frame */
 
 static void battle(double t)
@@ -718,15 +726,34 @@ static void frame(void)
 		return;
 	if (api->game->lives() < 5)
 		api->game->flag_set(LIVES_FLAG, 9);
-	/* the arena's middle: where the stage puts its players (the first one in) */
-	if (!have_middle)
+	/* the arena's middle: the setting's place on the ground, or (0, 0) where
+	   the stage puts its players (the first one in) */
+	if (!have_middle && (middle_x() || middle_z())) {
+		SmsGround g;
+		memset(&g, 0, sizeof g);
+		g.size   = sizeof g;
+		middle.x = (float)middle_x();
+		middle.z = (float)middle_z();
+		middle.y = 3000.0f;
+		if (api->game->ground(&middle, &g)) {
+			middle.y    = g.floor;
+			have_middle = 1;
+		}
+	}
+	if (!have_middle && !middle_x() && !middle_z())
 		for (slot = 0; slot < SMS_NET_MAX_PLAYERS && !have_middle; slot++)
 			if ((bits & SMS_NET_SLOT(slot)) && player(slot, &p) && (p.flags & SMS_NETP_VISIBLE)) {
 				middle      = p.position;
 				have_middle = 1;
-				arena(zone_start(), 0); /* the arena's edge, drawn: in the lobby too */
-				api->core->log(self, SMS_LOG_INFO, "the arena's middle: %.0f %.0f %.0f", middle.x, middle.y, middle.z);
 			}
+	if (have_middle && !edge_out) {
+		edge_out = 1;
+		arena(zone_start(), 0); /* the arena's edge, drawn: in the lobby too */
+		for (slot = 0; slot < SMS_NET_MAX_PLAYERS; slot++)
+			if (player(slot, &p) && !p.server)
+				arrive_inside(slot, p.in_stage); /* here already: into the arena now */
+		api->core->log(self, SMS_LOG_INFO, "the arena's middle: %.0f %.0f %.0f", middle.x, middle.y, middle.z);
+	}
 	if (bits != last_here && (phase == LOBBY || phase == COUNTDOWN)) {
 		last_here = bits;
 		if (phase == LOBBY)
@@ -868,6 +895,7 @@ static int on_session(SmsMod* mod, SmsEvent* ev, void* user)
 	if (SMS_API_HAS(api->net, set_collision))
 		api->net->set_collision(collide_on() ? 1 : -1);
 	have_middle  = 0; /* where this load starts its players */
+	edge_out     = 0;
 	zone_closing = 0;
 	memset(pickups, 0, sizeof pickups); /* the last session's markers went with it */
 	board_clear();
@@ -916,6 +944,31 @@ static int on_left(SmsMod* mod, SmsEvent* ev, void* user)
 	return SMS_CONTINUE;
 }
 
+/* Where `slot` comes into the arena each time they arrive (just joined, the
+   arena loaded afresh): inside it, near the middle, each in a place of their
+   own, rather than where the stage starts players (out on the sandbar). */
+static void arrive_inside(int slot, int now)
+{
+	const float a = 2.0f * PI_F * (float)(slot % SMS_NET_MAX_PLAYERS) / SMS_NET_MAX_PLAYERS;
+	SmsVec3 at;
+	SmsGround g;
+	if (!have_middle)
+		return;
+	at.x = middle.x + 450.0f * sinf(a);
+	at.z = middle.z + 450.0f * cosf(a);
+	at.y = middle.y + 400.0f;
+	memset(&g, 0, sizeof g);
+	g.size = sizeof g;
+	at.y   = api->game->ground(&at, &g) ? g.floor : middle.y;
+	const float yaw = (float)(atan2(middle.x - at.x, middle.z - at.z) * 180.0 / PI_F);
+	api->net->set_respawn(slot, SMS_RESPAWN_WARP, &at, yaw);
+	if (now) {
+		SmsCmd c = cmd(SMS_CMD_WARP);
+		c.f[0] = at.x, c.f[1] = at.y, c.f[2] = at.z, c.f[3] = yaw;
+		api->net->send(SMS_NET_SLOT(slot), &c);
+	}
+}
+
 static int on_joined(SmsMod* mod, SmsEvent* ev, void* user)
 {
 	const SmsEvNetPlayer* p = (const SmsEvNetPlayer*)ev->data;
@@ -924,6 +977,7 @@ static int on_joined(SmsMod* mod, SmsEvent* ev, void* user)
 	(void)user;
 	if (api->net->role() != SMS_NET_HOST)
 		return SMS_CONTINUE;
+	arrive_inside(p->slot, 0);
 	snprintf(text, sizeof text, "Welcome to the Splash Battle, %s! Spray the others, last one dry wins", p->name);
 	notice(SMS_NET_SLOT(p->slot), text);
 	return SMS_CONTINUE;
@@ -960,7 +1014,9 @@ SMS_MOD_EXTERN_C SMS_MOD_EXPORT int sms_mod_load(SmsMod* mod, const SmsApi* a)
 	add_option(SMS_OPTION_INT, "meter", "Water meter (drops)", 300, 50, 2000, 50);
 	add_option(SMS_OPTION_INT, "time_limit", "Time limit (seconds)", 180, 60, 600, 30);
 	add_option(SMS_OPTION_INT, "winner_seconds", "Winner shown (seconds)", 10, 3, 30, 1);
-	add_option(SMS_OPTION_INT, "zone_radius", "Arena's edge (units from the middle)", 3000, 1000, 8000, 250);
+	add_option(SMS_OPTION_INT, "zone_radius", "Arena's edge (units from the middle)", 3600, 1000, 8000, 200);
+	add_option(SMS_OPTION_INT, "middle_x", "Arena's middle, x (0, 0: the stage's start)", 1800, -30000, 30000, 100);
+	add_option(SMS_OPTION_INT, "middle_z", "Arena's middle, z", 2800, -30000, 30000, 100);
 	add_option(SMS_OPTION_BOOL, "zone", "The arena closes in", 1, 0, 1, 1);
 	add_option(SMS_OPTION_INT, "zone_end", "Closed to (units)", 600, 200, 3000, 100);
 	add_option(SMS_OPTION_BOOL, "refill", "FLUDD fills up by itself", 0, 0, 1, 1);
