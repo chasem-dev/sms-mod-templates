@@ -14,10 +14,11 @@
  *              player is put on a ring round the arena's middle, facing it,
  *              held, and "Ready... Go!";
  *   battle     water hits; each hit takes a drop off the meter, the HUD's
- *              health shows what is left, FLUDD's tank is kept topped up, and
- *              the zone (a ring of markers) closes in: outside it, the meter
- *              drains. The last one standing wins; at the time limit, the
- *              fullest meter;
+ *              health shows what is left; FLUDD starts a third full, uses
+ *              water fast and fills up only from the pickups round the arena
+ *              (WATER markers, back elsewhere after a cooldown); the arena's
+ *              edge, a red line on the ground, closes in. The last one
+ *              standing wins; at the time limit, the fullest meter;
  *   winner     everyone sees who won, and watches them, for a while;
  *   restart    the arena loads afresh for everyone: the lobby again.
  *
@@ -27,7 +28,8 @@
  *
  * Settings (the host's Mods menu, F1, or settings.ini in the mod's data
  * folder): players a round needs, the countdown, the meter, the time limit,
- * the zone, FLUDD's refills, collision, and the arena (area and episode).
+ * the arena's edge and its closing, water (at the start, its use, refills,
+ * pickups), collision, and the arena (area and episode).
  */
 #include <sms_mod.h>
 
@@ -48,7 +50,8 @@ static SmsMod* self;
 #define SOUND_OUT       0x4823                 /* SMS_SOUND_DAMAGE */
 #define SOUND_START     0x4851                 /* a race's start */
 #define RING_RADIUS     700.0f                 /* the line-up's ring round the middle */
-#define ZONE_MARKERS    8
+#define MOST_PICKUPS    8                      /* markers 0..7 */
+#define SOUND_WATER     0x4801                 /* SMS_SOUND_HEAL: water back */
 #define PI_F            3.14159265f
 
 static const double kLineUp = 3.0; /* seconds before the start: on the ring, held */
@@ -68,12 +71,28 @@ static int last_second = -1;
 static uint32_t last_here = 0xFFFFFFFFu;
 static int set_up;
 static double restart_asked;
-static double next_refill, next_zone, next_board;
+static double next_board;
 static double decided_at;      /* the round's last fall: the winner is called a moment after, for all to see it */
 
 static SmsVec3 middle;         /* the arena's middle: where the stage starts its players */
 static int have_middle;
-static float zone_radius;      /* now; it closes in over the battle */
+static float zone_radius;      /* the arena's edge as last sent */
+static int zone_closing;       /* the closing glide is out */
+
+/* the water pickups: where each is, whether it is up, when it comes back */
+static struct Pickup {
+	SmsVec3 at;
+	int up;
+	double back_at;
+} pickups[MOST_PICKUPS];
+static unsigned rand_state = 0x2545F491u;
+static double rand_unit(void)
+{
+	rand_state ^= rand_state << 13;
+	rand_state ^= rand_state >> 17;
+	rand_state ^= rand_state << 5;
+	return (double)(rand_state % 100000u) / 100000.0;
+}
 
 /* each player in this round */
 static int fighting[SMS_NET_MAX_PLAYERS]; /* in the round, not out */
@@ -93,8 +112,12 @@ static double show_s(void) { return api->config->get_int(self, "winner_seconds",
 static int zone_on(void) { return api->config->get_int(self, "zone", 1); }
 static float zone_start(void) { return (float)api->config->get_int(self, "zone_radius", 3000); }
 static float zone_end(void) { return (float)api->config->get_int(self, "zone_end", 600); }
-static int zone_drain(void) { return api->config->get_int(self, "zone_drain", 3); }
-static int refill_on(void) { return api->config->get_int(self, "refill", 1); }
+static int refill_on(void) { return api->config->get_int(self, "refill", 0); }
+static int start_water(void) { return api->config->get_int(self, "start_water", 30); }
+static int water_use(void) { return api->config->get_int(self, "water_use", 300); }
+static int pickup_count(void) { return api->config->get_int(self, "pickups", 5); }
+static int pickup_water(void) { return api->config->get_int(self, "pickup_water", 35); }
+static double pickup_cooldown(void) { return api->config->get_int(self, "pickup_cooldown", 40); }
 static int collide_on(void) { return api->config->get_int(self, "collision", 1); }
 static int arena_area(void) { return api->config->get_int(self, "area", 4); }
 static int arena_episode(void) { return api->config->get_int(self, "episode", 0); }
@@ -179,19 +202,6 @@ static void splash(int slot, const SmsVec3* at, uint32_t bits)
 	c.i[2]   = full_meter();
 	c.i[3]   = (int32_t)bits;
 	c.f[0]   = at->x, c.f[1] = at->y, c.f[2] = at->z;
-	api->net->send(SMS_NET_ALL, &c);
-}
-
-static void marker(int id, const SmsVec3* at, SmsColor color, int remove)
-{
-	SmsCmd c = cmd(SMS_CMD_MARKER);
-	c.flags  = SMS_CMD_STICKY;
-	c.i[0]   = id;
-	c.i[1]   = -1;
-	c.i[2]   = (int32_t)color;
-	c.i[3]   = remove;
-	c.f[0]   = at->x, c.f[1] = at->y, c.f[2] = at->z;
-	c.text   = "";
 	api->net->send(SMS_NET_ALL, &c);
 }
 
@@ -300,71 +310,136 @@ static void board_clear(void)
 	api->net->send(SMS_NET_ALL, &c);
 }
 
-/* ------------------------------------------------------------------ the zone */
+/* ------------------------------------------------------------------ the arena */
 
-static void zone_markers(int remove)
+/* The arena's edge in every game (SMS_CMD_BOUNDS): players are kept inside
+   it, and it is drawn as a red line on the ground. Kept for the session, so
+   a player arriving later has it too; `seconds` glides it there. */
+static void arena(float radius, double seconds)
 {
-	int k;
-	for (k = 0; k < ZONE_MARKERS; k++) {
-		const float a = 2.0f * PI_F * (float)k / ZONE_MARKERS;
-		SmsVec3 at;
+	SmsCmd c  = cmd(SMS_CMD_BOUNDS);
+	c.flags   = SMS_CMD_STICKY;
+	c.i[0]    = SMS_BOUNDS_RING;
+	c.i[1]    = (int32_t)SMS_RGB(235, 30, 30);
+	c.f[0]    = middle.x, c.f[1] = middle.y, c.f[2] = middle.z;
+	c.f[3]    = radius;
+	c.f2[0]   = (float)seconds;
+	zone_radius = radius;
+	api->net->send(SMS_NET_ALL, &c);
+}
+
+/* Over the battle the arena closes from its start to its end radius: the
+   first fifth of the time limit at full size, then gliding in until
+   seven-eighths of it, pushing everyone before it. */
+static void zone_tick(double t)
+{
+	const double grace = 0.2, closed = 0.85;
+	if (!zone_on() || !have_middle || zone_closing || t - started < grace * limit_s())
+		return;
+	zone_closing = 1;
+	arena(zone_end(), (closed - grace) * limit_s());
+	notice(SMS_NET_ALL, "The arena is closing in!");
+}
+
+/* ------------------------------------------------------------------ water */
+
+/* A spot in the arena for a pickup: on the ground (not in the water), well
+   inside the edge as it is now. */
+static int pickup_spot(SmsVec3* at)
+{
+	int tries;
+	for (tries = 0; tries < 16; tries++) {
+		const float a = (float)rand_unit() * 2.0f * PI_F;
+		const float r = (float)sqrt(rand_unit()) * zone_radius * 0.8f;
 		SmsGround g;
-		at.x = middle.x + zone_radius * sinf(a);
-		at.z = middle.z + zone_radius * cosf(a);
-		at.y = middle.y + 1500.0f;
+		at->x = middle.x + r * sinf(a);
+		at->z = middle.z + r * cosf(a);
+		at->y = middle.y + 600.0f;
 		memset(&g, 0, sizeof g);
 		g.size = sizeof g;
-		/* on the ground there (the water's top when that is higher) */
-		if (SMS_API_HAS(api->game, ground) && api->game->ground(&at, &g) && g.floor > -1e8f)
-			at.y = (g.has_water && g.water_y > g.floor ? g.water_y : g.floor) + 120.0f;
-		else
-			at.y = middle.y + 120.0f;
-		marker(k, &at, SMS_RGB(255, 80, 60), remove);
+		if (!api->game->ground(at, &g) || g.floor < middle.y - 800.0f)
+			continue;
+		if (g.has_water && g.water_y > g.floor + 20.0f)
+			continue; /* in the water: somewhere else */
+		at->y = g.floor;
+		return 1;
+	}
+	return 0;
+}
+
+static void pickup_show(int k, double t)
+{
+	SmsVec3 above;
+	if (!pickup_spot(&pickups[k].at)) {
+		pickups[k].back_at = t + 5.0; /* try again soon */
+		return;
+	}
+	pickups[k].up = 1;
+	above         = pickups[k].at;
+	above.y += 120.0f;
+	{
+		SmsCmd c = cmd(SMS_CMD_MARKER);
+		c.flags  = SMS_CMD_STICKY;
+		c.i[0]   = k;
+		c.i[1]   = -1;
+		c.i[2]   = (int32_t)SMS_RGB(70, 170, 255);
+		c.f[0]   = above.x, c.f[1] = above.y, c.f[2] = above.z;
+		c.text   = "WATER";
+		api->net->send(SMS_NET_ALL, &c);
 	}
 }
 
-/* Over the battle, the zone closes from its start to its end radius,
-   the first fifth of the time limit at full size. */
-static void zone_tick(double t)
+static void pickup_hide(int k)
 {
-	const double share = (t - started) / limit_s();
-	const double grace = 0.2, closed = 0.85;
-	const float from = zone_start(), to = zone_end();
-	float r;
-	int slot;
+	SmsCmd c   = cmd(SMS_CMD_MARKER);
+	c.flags    = SMS_CMD_STICKY;
+	c.i[0]     = k;
+	c.i[1]     = -1;
+	c.i[3]     = 1;
+	c.text     = "";
+	pickups[k].up = 0;
+	api->net->send(SMS_NET_ALL, &c);
+}
+
+static void pickups_clear(void)
+{
+	int k;
+	for (k = 0; k < MOST_PICKUPS; k++)
+		if (pickups[k].up)
+			pickup_hide(k);
+}
+
+/* Whoever reaches a pickup first takes its water; it comes back elsewhere
+   after its cooldown. */
+static void pickups_tick(double t)
+{
+	int k, slot;
 	SmsNetPlayer p;
-	if (!zone_on() || !have_middle)
-		return;
-	if (share <= grace)
-		r = from;
-	else if (share >= closed)
-		r = to;
-	else
-		r = from + (to - from) * (float)((share - grace) / (closed - grace));
-	if (fabsf(r - zone_radius) > 40.0f || t >= next_zone) {
-		zone_radius = r;
-		zone_markers(0);
-	}
-	if (t < next_zone)
-		return;
-	next_zone = t + 1.0;
-	/* outside it: the meter drains, a splash a second */
-	for (slot = 0; slot < SMS_NET_MAX_PLAYERS; slot++) {
-		float dx, dz;
-		if (!fighting[slot] || !player(slot, &p) || !(p.flags & SMS_NETP_VISIBLE))
+	char text[48];
+	const int count = pickup_count() < MOST_PICKUPS ? pickup_count() : MOST_PICKUPS;
+	for (k = 0; k < count; k++) {
+		if (!pickups[k].up) {
+			if (t >= pickups[k].back_at)
+				pickup_show(k, t);
 			continue;
-		dx = p.position.x - middle.x;
-		dz = p.position.z - middle.z;
-		if (dx * dx + dz * dz <= zone_radius * zone_radius)
-			continue;
-		meter[slot] -= zone_drain();
-		if (meter[slot] <= 0) {
-			meter[slot]   = 0;
-			down_by[slot] = -1;
 		}
-		splash(slot, &p.position, meter[slot] <= 0 ? SMS_SPLASH_DOWN : 0);
-		health_shows(slot);
-		notice(SMS_NET_SLOT(slot), "Outside the zone: get back in!");
+		for (slot = 0; slot < SMS_NET_MAX_PLAYERS; slot++) {
+			float dx, dy, dz;
+			if (!fighting[slot] || !player(slot, &p) || !(p.flags & SMS_NETP_VISIBLE))
+				continue;
+			dx = p.position.x - pickups[k].at.x;
+			dy = p.position.y - pickups[k].at.y;
+			dz = p.position.z - pickups[k].at.z;
+			if (dx * dx + dz * dz > 160.0f * 160.0f || dy < -150.0f || dy > 250.0f)
+				continue;
+			player_cmd(slot, SMS_PLAYER_ADD_WATER, pickup_water());
+			one(SMS_NET_SLOT(slot), SMS_CMD_SOUND, SOUND_WATER, 0);
+			snprintf(text, sizeof text, "+%d%% water", pickup_water());
+			notice(SMS_NET_SLOT(slot), text);
+			pickup_hide(k);
+			pickups[k].back_at = t + pickup_cooldown();
+			break;
+		}
 	}
 }
 
@@ -460,13 +535,15 @@ static void line_up(double left)
 		one(SMS_NET_SLOT(slot), SMS_CMD_HOLD, 1, 0);
 		in_round[slot] = 1;
 		meter[slot]    = full_meter();
-		player_cmd(slot, SMS_PLAYER_WATER, 100);
+		player_cmd(slot, SMS_PLAYER_WATER, start_water());
+		player_cmd(slot, SMS_PLAYER_WATER_USE, water_use());
 		player_cmd(slot, SMS_PLAYER_NOZZLE, 0); /* the spray nozzle: a fair fight */
 		health_shows(slot);
 	}
 	one(SMS_NET_ALL, SMS_CMD_READY_GO, (int32_t)to_go, 0);
 	one(SMS_NET_ALL, SMS_CMD_HOLD, 0, to_go);
-	rules(SMS_RULE_NO_DAMAGE | SMS_RULE_WATER_HITS, to_go);
+	/* from "Go!": water hits, and FLUDD fills up only from the pickups */
+	rules(SMS_RULE_NO_DAMAGE | SMS_RULE_WATER_HITS | (refill_on() ? 0u : SMS_RULE_NO_REFILL), to_go);
 	timer(SMS_NET_ALL, SMS_TIMER_DOWN, limit_s(), to_go);
 	one(SMS_NET_ALL, SMS_CMD_SOUND, SOUND_START, to_go);
 	one(SMS_NET_ALL, SMS_CMD_MUSIC, MUSIC_BATTLE, to_go);
@@ -495,8 +572,13 @@ static void round_over(int slot)
 		banner(SMS_NET_ALL, SMS_RGB(255, 255, 255), "A DRAW!");
 		one(SMS_NET_ALL, SMS_CMD_HOLD, 1, 0);
 	}
-	if (zone_on())
-		zone_markers(1);
+	pickups_clear();
+	{
+		SmsCmd c = cmd(SMS_CMD_PLAYER); /* FLUDD as it was */
+		c.i[0]   = SMS_PLAYER_WATER_USE;
+		c.i[1]   = 100;
+		api->net->send(SMS_NET_ALL, &c);
+	}
 	board();
 	enter(WINNER, show_s());
 }
@@ -576,7 +658,6 @@ static int to_watch(int slot)
 static void battle(double t)
 {
 	int slot;
-	SmsNetPlayer p;
 	const uint32_t bits = here();
 	/* gone from the arena (left, or loading after a fall): out */
 	for (slot = 0; slot < SMS_NET_MAX_PLAYERS; slot++)
@@ -591,12 +672,7 @@ static void battle(double t)
 				one(SMS_NET_SLOT(slot), SMS_CMD_WATCH, w, 0);
 			}
 		}
-	if (refill_on() && t >= next_refill) {
-		next_refill = t + 2.0;
-		for (slot = 0; slot < SMS_NET_MAX_PLAYERS; slot++)
-			if (fighting[slot] && player(slot, &p))
-				player_cmd(slot, SMS_PLAYER_WATER, 100);
-	}
+	pickups_tick(t);
 	zone_tick(t);
 	for (slot = 0; slot < SMS_NET_MAX_PLAYERS; slot++)
 		if (fighting[slot] && meter[slot] <= 0)
@@ -648,6 +724,7 @@ static void frame(void)
 			if ((bits & SMS_NET_SLOT(slot)) && player(slot, &p) && (p.flags & SMS_NETP_VISIBLE)) {
 				middle      = p.position;
 				have_middle = 1;
+				arena(zone_start(), 0); /* the arena's edge, drawn: in the lobby too */
 				api->core->log(self, SMS_LOG_INFO, "the arena's middle: %.0f %.0f %.0f", middle.x, middle.y, middle.z);
 			}
 	if (bits != last_here && (phase == LOBBY || phase == COUNTDOWN)) {
@@ -688,10 +765,11 @@ static void frame(void)
 				fighting[slot] = in_round[slot];
 				down_by[slot]  = -1;
 			}
-			zone_radius = zone_start();
-			decided_at  = 0;
-			next_refill = next_board = t + 1.0;
-			next_zone   = t;
+			decided_at   = 0;
+			next_board   = t + 1.0;
+			zone_closing = 0;
+			for (slot = 0; slot < MOST_PICKUPS; slot++)
+				pickups[slot].back_at = t; /* out at once */
 			status("");
 			enter(BATTLE, limit_s());
 			board();
@@ -789,7 +867,9 @@ static int on_session(SmsMod* mod, SmsEvent* ev, void* user)
 	}
 	if (SMS_API_HAS(api->net, set_collision))
 		api->net->set_collision(collide_on() ? 1 : -1);
-	have_middle = 0; /* where this load starts its players */
+	have_middle  = 0; /* where this load starts its players */
+	zone_closing = 0;
+	memset(pickups, 0, sizeof pickups); /* the last session's markers went with it */
 	board_clear();
 	lobby();
 	return SMS_CONTINUE;
@@ -870,8 +950,9 @@ SMS_MOD_EXTERN_C SMS_MOD_EXPORT int sms_mod_load(SmsMod* mod, const SmsApi* a)
 {
 	api  = a;
 	self = mod;
-	if (!SMS_API_HAS(api, net) || !SMS_API_HAS(api->net, set_collision) || !SMS_API_HAS(api->game, ground)) {
-		api->core->log(mod, SMS_LOG_ERROR, "needs a game with mod API 1.5 beta 5 (water fights)");
+	if (!SMS_API_HAS(api, net) || !SMS_API_HAS(api->net, set_collision) || !SMS_API_HAS(api->game, ground)
+	    || (api->major == 1 && api->minor == 5 && api->size >= sizeof *api && api->prerelease && api->prerelease < 7)) {
+		api->core->log(mod, SMS_LOG_ERROR, "needs a game with mod API 1.5 beta 7 (water fights, arenas, water pickups)");
 		return 1;
 	}
 	add_option(SMS_OPTION_INT, "min_players", "Players a round needs", 2, 2, 8, 1);
@@ -879,11 +960,15 @@ SMS_MOD_EXTERN_C SMS_MOD_EXPORT int sms_mod_load(SmsMod* mod, const SmsApi* a)
 	add_option(SMS_OPTION_INT, "meter", "Water meter (drops)", 300, 50, 2000, 50);
 	add_option(SMS_OPTION_INT, "time_limit", "Time limit (seconds)", 180, 60, 600, 30);
 	add_option(SMS_OPTION_INT, "winner_seconds", "Winner shown (seconds)", 10, 3, 30, 1);
-	add_option(SMS_OPTION_BOOL, "zone", "Closing zone", 1, 0, 1, 1);
-	add_option(SMS_OPTION_INT, "zone_radius", "Zone at the start (units)", 3000, 1000, 8000, 250);
-	add_option(SMS_OPTION_INT, "zone_end", "Zone at the end (units)", 600, 200, 3000, 100);
-	add_option(SMS_OPTION_INT, "zone_drain", "Drops a second outside it", 3, 1, 20, 1);
-	add_option(SMS_OPTION_BOOL, "refill", "FLUDD kept full", 1, 0, 1, 1);
+	add_option(SMS_OPTION_INT, "zone_radius", "Arena's edge (units from the middle)", 3000, 1000, 8000, 250);
+	add_option(SMS_OPTION_BOOL, "zone", "The arena closes in", 1, 0, 1, 1);
+	add_option(SMS_OPTION_INT, "zone_end", "Closed to (units)", 600, 200, 3000, 100);
+	add_option(SMS_OPTION_BOOL, "refill", "FLUDD fills up by itself", 0, 0, 1, 1);
+	add_option(SMS_OPTION_INT, "start_water", "Water at the start (%)", 30, 0, 100, 5);
+	add_option(SMS_OPTION_INT, "water_use", "Water use (% of FLUDD's own)", 300, 50, 600, 25);
+	add_option(SMS_OPTION_INT, "pickups", "Water pickups", 5, 0, 8, 1);
+	add_option(SMS_OPTION_INT, "pickup_water", "Water a pickup gives (%)", 35, 5, 100, 5);
+	add_option(SMS_OPTION_INT, "pickup_cooldown", "Pickup back after (seconds)", 40, 5, 180, 5);
 	add_option(SMS_OPTION_BOOL, "collision", "Players collide", 1, 0, 1, 1);
 	add_option(SMS_OPTION_INT, "area", "Arena (area)", 4, 1, 60, 1);
 	add_option(SMS_OPTION_INT, "episode", "Arena (episode)", 0, 0, 7, 1);
