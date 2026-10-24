@@ -16,9 +16,13 @@ It is a **server mod** (`side = server` in its `mod.ini`): it runs on the host o
 
 *The arena's edge, a red line on the sand: nobody gets past it, and over the round it closes in, pushing everyone before it. The arena is inland, on the beach's widest stretch of sand, clear of the sea.*
 
-![Bo's game: "+35% water" at the top, WATER markers over pickups across the beach, FLUDD's gauge part full](docs/pickup.jpg)
+![The waiting lobby: Mario and Luigi on the sandbar inside its red ring, no FLUDD, "SPLASH BATTLE IN 10"](docs/lobby.jpg)
 
-*Water is scarce: FLUDD doesn't fill up from the sea, so players race for the pickups (the WATER markers), each coming back somewhere else after its cooldown.*
+*The waiting lobby: the sandbar where the stage puts players, inside its own red ring, with no FLUDD on anyone's back. Once two players are in, the countdown starts; at "Go!" everyone is in the arena inland with FLUDD and a quarter of a tank.*
+
+![A water capsule on the sand: one of the beach's water bottles, shrunk](docs/capsule.jpg)
+
+*Water is scarce: FLUDD doesn't fill up from the sea, so players hunt for the capsules (the beach's own water bottles, shrunk), each worth a quarter of a tank and back somewhere else after 30 seconds. (Here with the optional WATER markers over them.)*
 
 ![Ana's game at "GO!": both players on the ring round the arena's middle, each with a full meter over their head](docs/start.jpg)
 
@@ -28,10 +32,10 @@ It is a **server mod** (`side = server` in its `mod.ini`): it runs on the host o
 
 | | What players see | What the server does |
 | --- | --- | --- |
-| **Lobby** | "waiting for players (1 of 2 here)", free to play inside the red edge; the HUD shows only health and FLUDD's water (no Shines, coins or lives) | counts the players in the arena; the stage's enemies are hidden and its Shines gone, and nobody can leave the arena: its edge (`SMS_CMD_BOUNDS`) is drawn on the ground round its middle, inland, and every player arriving is put inside it (`net->set_respawn`), not out where the stage starts them |
-| **Countdown** | "SPLASH BATTLE IN 8", the clock counting down | three seconds before the start: everyone onto a ring round the arena's middle, facing it, held; a third of a tank each, FLUDD using water three times as fast, the spray nozzle |
+| **Lobby** | "waiting for players (1 of 2 here)", on the sandbar where the stage puts players, inside its own red ring, with no FLUDD; the HUD shows only the health (no Shines, coins, lives or water) | counts the players in the stage; the stage's enemies are hidden and its Shines gone, nobody can leave; the lobby's edge (`SMS_CMD_BOUNDS`) and FLUDD off (`SMS_PLAYER_FLUDD`), both sticky for players arriving later |
+| **Countdown** | "SPLASH BATTLE IN 8", the clock counting down | three seconds before the start: the edge moves to the arena, inland, and everyone is put on a ring round its middle, facing it, held; at "Go!" FLUDD on everyone's back with the spray nozzle and a quarter of a tank, using water three times as fast |
 | **Battle** | "Ready... Go!", Shadow Mario's chase music, the clock counting down from the time limit; a board of everyone's meter | water hits the other players (`SMS_RULE_WATER_HITS`); each drop that hits takes one off the meter; players collide; FLUDD fills up only from the pickups (`SMS_RULE_NO_REFILL`) |
-| **Water** | WATER markers round the arena; "+35% water" for whoever reaches one | five pickups at random spots on dry ground inside the edge; the first player there gets a share of a tank (`SMS_PLAYER_ADD_WATER`); each comes back somewhere else 40 seconds later |
+| **Water** | water capsules on the sand round the arena; "+25% water" for whoever reaches one | six capsules (the stage's water bottles, `SMS_CMD_SPAWN`, shrunk) at random spots on dry ground inside the edge; the first player there gets a share of a tank (`SMS_PLAYER_ADD_WATER`; the bottle's own refill is off under `SMS_RULE_NO_REFILL`); each comes back somewhere else 30 seconds later |
 | **The arena closes** | "The arena is closing in!"; the red edge moving in | after a fifth of the time limit the edge glides in to 600 units, pushing everyone before it, by seven-eighths of it |
 | **Out** | "Ana soaked Bo! 1 left"; the one soaked is thrown back, then watches whoever soaked them | a meter at 0 is out; so is a player who falls out of the arena (a lost life) or leaves |
 | **Winner** | "Ana WINS!" in their colour, the race fanfare; everyone watching the winner | the last one standing wins; at the time limit, the fullest meter (a tie is a draw) |
@@ -54,8 +58,9 @@ On the host: its Mods menu (F1), or `settings.ini` in the mod's data folder.
 | **Arena's edge** (`zone_radius`) | 3600 units from the middle |
 | **The arena closes in** (`zone`), **to** (`zone_end`) | on, to 600 units |
 | **FLUDD fills up by itself** (`refill`) | off: only from the pickups |
-| **Water at the start** (`start_water`), **water use** (`water_use`) | 30% of a tank; 300% of FLUDD's own rate (a full tank sprays for about half a minute) |
-| **Water pickups** (`pickups`), **water a pickup gives** (`pickup_water`), **back after** (`pickup_cooldown`) | 5; 35% of a tank; 40 seconds |
+| **Water at the start** (`start_water`), **water use** (`water_use`) | 25% of a tank; 300% of FLUDD's own rate (a full tank sprays for about half a minute) |
+| **Water capsules** (`pickups`), **water a capsule gives** (`pickup_water`), **back after** (`pickup_cooldown`), **WATER markers over them** (`pickup_markers`) | 6; 25% of a tank; 30 seconds; off |
+| **The lobby** (`lobby_x`, `lobby_z`, `lobby_radius`) | 10600, -3600, 850: the sandbar where Gelato Beach puts its players (0, 0: wherever the stage puts them) |
 | **Players collide** (`collision`) | on (off: the host's own Player Collision setting) |
 | **Arena** (`area`, `episode`) | 4, 0: Gelato Beach. The middle is where the stage puts its players |
 
@@ -89,6 +94,7 @@ The whole mod is [`src/splash_battle.c`](src/splash_battle.c): plain C against t
 - **The reaction is every game's:** `SMS_CMD_SPLASH` to everyone, with the meter left, shows Shadow Mario's splash, sound, flush and meter on that player in every game; `SMS_SPLASH_DOWN` when it is empty throws them back. `SMS_PLAYER_HEALTH` puts the meter on their HUD's health as well.
 - **Collision:** `net->set_collision(1)` for the arena's sessions, so nobody hides inside anyone and a stomp lands.
 - **The arena, in every game:** `BOUNDS` keeps everyone within its edge and draws it on the ground, and one `BOUNDS` with `f2[0]` seconds closes it; `ACTORS` hides the stage's enemies and kills its Shines, `STAY` keeps everyone there, `RULES` keeps damage off, `HUD` leaves only the health (the water meter) and FLUDD's water on the HUD; all **sticky**, so a player arriving later gets them too.
-- **Water as ammunition:** `SMS_RULE_NO_REFILL`, `SMS_PLAYER_WATER` at the start, `SMS_PLAYER_WATER_USE`, and the pickups: `MARKER`s over spots on dry ground (`game->ground` on the server's own copy of the stage), judged from where the server hears each player is, `SMS_PLAYER_ADD_WATER` for whoever reaches one.
+- **The lobby:** a `BOUNDS` round the sandbar and `SMS_PLAYER_FLUDD` 0, sticky; at the line-up a `BOUNDS` round the arena before the `WARP`s, and at "Go!" `SMS_PLAYER_FLUDD` 1 and the water.
+- **Water as ammunition:** `SMS_RULE_NO_REFILL`, `SMS_PLAYER_WATER` at the start, `SMS_PLAYER_WATER_USE`, and the capsules: a `SPAWN` of `bottle_large` (a new id each time, sticky until taken, then unstuck and `OBJECT` `KILL`), `OBJECT` `SCALE` 0.6, at a spot on dry ground (`game->ground` on the server's own copy of the stage), judged taken from where the server hears each player is, `SMS_PLAYER_ADD_WATER` for whoever reached it.
 - **The start, lined up across the players:** at three seconds to go it sends `WARP` and `HOLD` now, and `HOLD` off, `RULES` with water hits, `TIMER`, the start's sound and the music with a `delay_ms` of the time left; `READY_GO` gets "Go!" there too.
 - **Events:** `SMS_EV_NET_SESSION` (the arena loaded: set it up, the lobby), `SMS_EV_NET_PLAYER_SPLASHED` (a hit), `SMS_EV_NET_PLAYER_ARRIVED` (someone in the arena: mid-battle, they watch), `SMS_EV_NET_PLAYER_LEFT`, `SMS_EV_NET_PLAYER_JOINED` (a welcome), and `SMS_EV_FRAME` for the rest.
