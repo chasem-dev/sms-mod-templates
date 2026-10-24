@@ -891,6 +891,12 @@ static int on_session(SmsMod* mod, SmsEvent* ev, void* user)
 		c.flags = SMS_CMD_STICKY;
 		c.i[0]  = 1;
 		api->net->send(SMS_NET_ALL, &c);
+		/* the HUD shows what a fight needs: the health (the water meter) and
+		   FLUDD's water; not the Shines, coins, blue or red coins and lives */
+		c       = cmd(SMS_CMD_HUD);
+		c.flags = SMS_CMD_STICKY;
+		c.i[0]  = (int32_t)(SMS_HUD_SHINES | SMS_HUD_COINS | SMS_HUD_BLUE_COINS | SMS_HUD_RED_COINS | SMS_HUD_LIVES);
+		api->net->send(SMS_NET_ALL, &c);
 	}
 	if (SMS_API_HAS(api->net, set_collision))
 		api->net->set_collision(collide_on() ? 1 : -1);
