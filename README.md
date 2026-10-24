@@ -33,6 +33,7 @@ Complete mods to read and borrow from. Each folder has a README with a picture o
 | [`examples/lua-challenges`](examples/lua-challenges) | **Lua**: a challenge against the clock each time a stage loads, with a panel, world markers, the game's sounds and a best streak; it reads the C stage timer's event. |
 | [`examples/squid-race`](examples/squid-race) | **C, a server mod**: a race round Ricco Harbor's Blooper course for everyone who joins a multiplayer game, run by the host alone; players join with the plain game. |
 | [`examples/lua-red-light`](examples/lua-red-light) | **Lua, a server mod**: Red Light, Green Light for everyone in a multiplayer game; anyone the server sees moving on red goes back to the start. |
+| [`examples/splash-battle`](examples/splash-battle) | **C, a server mod**: a water fight, last one standing wins: FLUDD's water hits the other players, each hit splashing them as Shadow Mario is splashed (API 1.5 beta 5; built on its own, see its README). |
 
 ## The Mods menu
 

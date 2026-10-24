@@ -17,6 +17,8 @@ foreach(t smsmod_hello smsmod_trainer_hud smsmod_stage_timer smsmod_squid_race)
   endif()
 endforeach()
 
+# splash-battle/ needs mod API 1.5 beta 5 and builds on its own (its CMakeLists.txt)
+
 # Lua script mods: nothing to build
 sms_add_script_mod(lua-challenges/mod)
 sms_add_script_mod(lua-red-light/mod)
