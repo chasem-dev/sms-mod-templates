@@ -14,9 +14,10 @@
  *              player is put on a ring round the arena's middle, facing it,
  *              held, and "Ready... Go!";
  *   battle     water hits; each hit takes a drop off the meter, the HUD's
- *              health shows what is left; FLUDD starts a third full, uses
- *              water fast and fills up only from the pickups round the arena
- *              (WATER markers, back elsewhere after a cooldown); the arena's
+ *              health shows what is left; FLUDD starts a fifth full, uses
+ *              water fast and fills up only from the capsules spread over the
+ *              arena (each there a while, then elsewhere; a taken one back
+ *              after a cooldown); the arena's
  *              edge, a red line on the ground, closes in. The last one
  *              standing wins; at the time limit, the fullest meter;
  *   winner     everyone sees who won, and watches them, for a while;
@@ -51,6 +52,8 @@ static SmsMod* self;
 #define SOUND_START     0x4851                 /* a race's start */
 #define RING_RADIUS     700.0f                 /* the line-up's ring round the middle */
 #define MOST_PICKUPS    8                      /* markers 0..7 */
+#define MOST_SPAWNS     110 /* bottles a session may make: the game keeps 128 spawns a stage */
+#define PICKUP_LIFE     20  /* seconds an untaken capsule stays */
 #define SOUND_WATER     0x4801                 /* SMS_SOUND_HEAL: water back */
 #define PI_F            3.14159265f
 
@@ -78,7 +81,9 @@ static SmsVec3 middle;         /* the arena's middle: where the stage starts its
 static int have_middle;
 static SmsVec3 lobby_at;       /* the waiting lobby's middle */
 static int edge_out;           /* the edge is out for this session, and players are brought inside it */
-static float zone_radius;      /* the arena's edge as last sent */
+static float zone_radius;      /* the arena's edge as last sent: where it goes */
+static float zone_from;        /* and where it glides from, from when, for how long */
+static double zone_since, zone_secs;
 static int zone_closing;       /* the closing glide is out */
 
 /* the water pickups: where each is, whether it is up, when it comes back */
@@ -87,7 +92,9 @@ static struct Pickup {
 	int up;
 	int id;        /* the bottle's spawn id (SMS_CMD_SPAWN's i[3]) */
 	double back_at;
+	double gone_at; /* when it goes, untaken, to come back elsewhere */
 } pickups[MOST_PICKUPS];
+static float pickup_spin; /* this round's turn of the capsules' slices of the arena */
 static int next_spawn_id = 1; /* each bottle a new one: a taken one is gone for good */
 static unsigned rand_state = 0x2545F491u;
 static double rand_unit(void)
@@ -117,11 +124,16 @@ static int zone_on(void) { return api->config->get_int(self, "zone", 1); }
 static float zone_start(void) { return (float)api->config->get_int(self, "zone_radius", 3600); }
 static float zone_end(void) { return (float)api->config->get_int(self, "zone_end", 600); }
 static int refill_on(void) { return api->config->get_int(self, "refill", 0); }
-static int start_water(void) { return api->config->get_int(self, "start_water", 25); }
+static int start_water(void) { return api->config->get_int(self, "start_water", 19); }
 static int water_use(void) { return api->config->get_int(self, "water_use", 300); }
-static int pickup_count(void) { return api->config->get_int(self, "pickups", 6); }
-static int pickup_water(void) { return api->config->get_int(self, "pickup_water", 25); }
+static int pickup_count(void)
+{
+	const int n = api->config->get_int(self, "pickups", 8);
+	return n < MOST_PICKUPS ? n : MOST_PICKUPS;
+}
+static int pickup_water(void) { return api->config->get_int(self, "pickup_water", 12); }
 static double pickup_cooldown(void) { return api->config->get_int(self, "pickup_cooldown", 30); }
+static double pickup_life(void) { return api->config->get_int(self, "pickup_life", PICKUP_LIFE); }
 static int collide_on(void) { return api->config->get_int(self, "collision", 1); }
 static int arena_area(void) { return api->config->get_int(self, "area", 4); }
 /* the arena's middle on the map: on Gelato Beach's sand, its widest stretch
@@ -342,9 +354,23 @@ static void edge(const SmsVec3* at, float radius, double seconds)
 	api->net->send(SMS_NET_ALL, &c);
 }
 
+/* The arena's edge at time t, as players' games glide it (in a line). */
+static float zone_at(double t)
+{
+	if (zone_secs <= 0.0 || t >= zone_since + zone_secs)
+		return zone_radius;
+	if (t <= zone_since)
+		return zone_from;
+	return zone_from + (zone_radius - zone_from) * (float)((t - zone_since) / zone_secs);
+}
+
 static void arena(float radius, double seconds)
 {
-	zone_radius = radius;
+	const double t = now();
+	zone_from      = zone_radius > 0.0f ? zone_at(t) : radius;
+	zone_since     = t;
+	zone_secs      = seconds;
+	zone_radius    = radius;
 	edge(&middle, radius, seconds);
 }
 
@@ -386,18 +412,43 @@ static void zone_tick(double t)
 
 /* ------------------------------------------------------------------ water */
 
-/* A spot in the arena for a pickup: on the ground (not in the water), well
-   inside the edge as it is now. */
-static int pickup_spot(SmsVec3* at)
+/* Another capsule up within `apart` of `at`. */
+static int pickup_near(int k, const SmsVec3* at, float apart)
 {
+	int j;
+	for (j = 0; j < MOST_PICKUPS; j++) {
+		float dx, dz;
+		if (j == k || !pickups[j].up)
+			continue;
+		dx = pickups[j].at.x - at->x;
+		dz = pickups[j].at.z - at->z;
+		if (dx * dx + dz * dz < apart * apart)
+			return 1;
+	}
+	return 0;
+}
+
+/* A spot in the arena for capsule k: on the ground (not in the water),
+   inside the edge as it will be when the capsule moves on (the edge closing
+   in meanwhile), spread over all of it: each capsule has its own slice of
+   the arena (as a cake is cut, turned each round), anywhere from near the
+   middle out to near the edge, and keeps clear of the others. */
+static int pickup_spot(int k, SmsVec3* at)
+{
+	const float slice  = 2.0f * PI_F / (float)(pickup_count() > 0 ? pickup_count() : 1);
+	const float radius = zone_at(now() + pickup_life());
 	int tries;
-	for (tries = 0; tries < 16; tries++) {
-		const float a = (float)rand_unit() * 2.0f * PI_F;
-		const float r = (float)sqrt(rand_unit()) * zone_radius * 0.8f;
+	for (tries = 0; tries < 24; tries++) {
+		/* its slice first; then anywhere; the last tries anywhere at all */
+		const float a = tries < 12 ? pickup_spin + ((float)k + (float)rand_unit()) * slice
+		                           : (float)rand_unit() * 2.0f * PI_F;
+		const float r = (float)sqrt(0.02 + 0.98 * rand_unit()) * radius * 0.85f;
 		SmsGround g;
 		at->x = middle.x + r * sinf(a);
 		at->z = middle.z + r * cosf(a);
 		at->y = middle.y + 600.0f;
+		if (tries < 20 && pickup_near(k, at, radius * 0.3f))
+			continue;
 		memset(&g, 0, sizeof g);
 		g.size = sizeof g;
 		if (!api->game->ground(at, &g) || g.floor < middle.y - 800.0f)
@@ -418,12 +469,17 @@ static void pickup_show(int k, double t)
 {
 	char kind[16];
 	SmsCmd c;
-	if (!pickup_spot(&pickups[k].at)) {
+	if (next_spawn_id > MOST_SPAWNS) {
+		pickups[k].back_at = t + 1e9; /* this session's spawns are used up */
+		return;
+	}
+	if (!pickup_spot(k, &pickups[k].at)) {
 		pickups[k].back_at = t + 5.0; /* try again soon */
 		return;
 	}
-	pickups[k].up = 1;
-	pickups[k].id = next_spawn_id++;
+	pickups[k].up      = 1;
+	pickups[k].id      = next_spawn_id++;
+	pickups[k].gone_at = t + pickup_life();
 	c             = cmd(SMS_CMD_SPAWN);
 	c.flags       = SMS_CMD_STICKY; /* a player arriving later sees it too */
 	c.text        = "bottle_large";
@@ -451,8 +507,8 @@ static void pickup_show(int k, double t)
 	}
 }
 
-/* Taken (or the round over): gone from every game, and forgotten for those
-   arriving later. */
+/* Taken, gone untaken, or the round over: gone from every game, and
+   forgotten for those arriving later. */
 static void pickup_hide(int k)
 {
 	char kind[16];
@@ -493,18 +549,27 @@ static void pickups_clear(void)
 			pickup_hide(k);
 }
 
-/* Whoever reaches a pickup first takes its water; it comes back elsewhere
-   after its cooldown. */
+/* Whoever reaches a capsule first takes its water; it comes back elsewhere
+   after its cooldown. One nobody takes goes after a while and is at once
+   somewhere else, so they don't sit where nobody goes. (Players' games up to
+   the stable game of 2026.10.26 drop a spawned bottle on their own after
+   five seconds, flashing, as a dropped item; later ones keep it until it is
+   killed. Each capsule is a new spawn, and a stage takes 128 of them.) */
 static void pickups_tick(double t)
 {
 	int k, slot;
 	SmsNetPlayer p;
 	char text[48];
-	const int count = pickup_count() < MOST_PICKUPS ? pickup_count() : MOST_PICKUPS;
+	const int count = pickup_count();
 	for (k = 0; k < count; k++) {
 		if (!pickups[k].up) {
 			if (t >= pickups[k].back_at)
 				pickup_show(k, t);
+			continue;
+		}
+		if (t >= pickups[k].gone_at) {
+			pickup_hide(k);
+			pickups[k].back_at = t + 1.0;
 			continue;
 		}
 		for (slot = 0; slot < SMS_NET_MAX_PLAYERS; slot++) {
@@ -894,6 +959,7 @@ static void frame(void)
 			decided_at   = 0;
 			next_board   = t + 1.0;
 			zone_closing = 0;
+			pickup_spin = (float)rand_unit() * 2.0f * PI_F;
 			for (slot = 0; slot < MOST_PICKUPS; slot++)
 				pickups[slot].back_at = t; /* out at once */
 			status("");
@@ -1098,11 +1164,12 @@ SMS_MOD_EXTERN_C SMS_MOD_EXPORT int sms_mod_load(SmsMod* mod, const SmsApi* a)
 	add_option(SMS_OPTION_BOOL, "zone", "The arena closes in", 1, 0, 1, 1);
 	add_option(SMS_OPTION_INT, "zone_end", "Closed to (units)", 600, 200, 3000, 100);
 	add_option(SMS_OPTION_BOOL, "refill", "FLUDD fills up by itself", 0, 0, 1, 1);
-	add_option(SMS_OPTION_INT, "start_water", "Water at the start (%)", 25, 0, 100, 5);
+	add_option(SMS_OPTION_INT, "start_water", "Water at the start (%)", 19, 0, 100, 1);
 	add_option(SMS_OPTION_INT, "water_use", "Water use (% of FLUDD's own)", 300, 50, 600, 25);
-	add_option(SMS_OPTION_INT, "pickups", "Water capsules", 6, 0, 8, 1);
-	add_option(SMS_OPTION_INT, "pickup_water", "Water a capsule gives (%)", 25, 5, 100, 5);
-	add_option(SMS_OPTION_INT, "pickup_cooldown", "Capsule back after (seconds)", 30, 5, 180, 5);
+	add_option(SMS_OPTION_INT, "pickups", "Water capsules", 8, 0, MOST_PICKUPS, 1);
+	add_option(SMS_OPTION_INT, "pickup_water", "Water a capsule gives (%)", 12, 1, 100, 1);
+	add_option(SMS_OPTION_INT, "pickup_cooldown", "Taken capsule back after (seconds)", 30, 5, 180, 5);
+	add_option(SMS_OPTION_INT, "pickup_life", "Untaken capsule moves after (seconds)", PICKUP_LIFE, 5, 120, 1);
 	add_option(SMS_OPTION_BOOL, "pickup_markers", "WATER markers over the pickups", 0, 0, 1, 1);
 	add_option(SMS_OPTION_INT, "lobby_x", "Lobby's middle, x (0, 0: where the stage starts)", 10600, -30000, 30000, 100);
 	add_option(SMS_OPTION_INT, "lobby_z", "Lobby's middle, z", -3600, -30000, 30000, 100);
