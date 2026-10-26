@@ -1084,7 +1084,7 @@ SMS_MOD_EXTERN_C SMS_MOD_EXPORT int sms_mod_load(SmsMod* mod, const SmsApi* a)
 	self = mod;
 	if (!SMS_API_HAS(api, net) || !SMS_API_HAS(api->net, set_collision) || !SMS_API_HAS(api->game, ground)
 	    || (api->major == 1 && api->minor == 5 && api->size >= sizeof *api && api->prerelease && api->prerelease < 7)) {
-		api->core->log(mod, SMS_LOG_ERROR, "needs a game with mod API 1.5 beta 7 (water fights, arenas, water pickups)");
+		api->core->log(mod, SMS_LOG_ERROR, "needs a game with mod API 1.5 (water fights, arenas, water pickups)");
 		return 1;
 	}
 	add_option(SMS_OPTION_INT, "min_players", "Players a round needs", 2, 2, 8, 1);

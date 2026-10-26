@@ -77,7 +77,7 @@ SMS_NATIVE_MODS_DIR=/path/to/server-mods \
 
 or put it in [sms-server](https://github.com/chasem-dev/sms-server)'s `mods/`. It goes straight from the title to the arena; players join it as any game. A player's own game can host it too (Host Game with the mod installed): it plays along.
 
-Players' games need mod API 1.5 beta 7 or later (`client_api = 1.5`; an older 1.5 beta has no arena's edge, water hits or water rules).
+Players' games need mod API 1.5 or later (`client_api = 1.5`).
 
 ## Building
 
@@ -88,7 +88,7 @@ cmake --build build
 
 ## How it is made
 
-The whole mod is [`src/splash_battle.c`](src/splash_battle.c): plain C against the SDK's `sms_mod.h`, API 1.5 beta 7 (water fights and arenas, docs/MODDING.md).
+The whole mod is [`src/splash_battle.c`](src/splash_battle.c): plain C against the SDK's `sms_mod.h`, API 1.5 (water fights and arenas, docs/MODDING.md).
 
 - **Water hits are the players' games' word:** with `SMS_RULE_WATER_HITS` each game stops its own player's drops at the other players and tells the host; the mod hears `SMS_EV_NET_PLAYER_SPLASHED` (who, by whom, how many drops) and takes them off that player's meter.
 - **The reaction is every game's:** `SMS_CMD_SPLASH` to everyone, with the meter left, shows Shadow Mario's splash, sound, flush and meter on that player in every game; `SMS_SPLASH_DOWN` when it is empty throws them back. `SMS_PLAYER_HEALTH` puts the meter on their HUD's health as well.
