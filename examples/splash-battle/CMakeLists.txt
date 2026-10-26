@@ -1,5 +1,5 @@
-# Builds the Splash Battle server mod for the Super Mario Sunshine PC port, on
-# its own (the examples' top-level build has an older SDK):
+# Builds the Splash Battle server mod for the Super Mario Sunshine PC port on
+# its own (the top-level build builds it with the other examples):
 #
 #   cmake -S . -B build -DSMS_MODS_OUT=/path/to/the/server/mods   # -DSMS_MOD_ARCH=32 for a 32-bit Linux game
 #   cmake --build build
@@ -15,7 +15,7 @@ project(splash_battle C)
 include(FetchContent)
 FetchContent_Declare(sms_mod_sdk
   GIT_REPOSITORY https://github.com/chasem-dev/sms-mod-sdk.git
-  GIT_TAG v1.5.0-beta.7
+  GIT_TAG v1.5.0
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(sms_mod_sdk)
 
