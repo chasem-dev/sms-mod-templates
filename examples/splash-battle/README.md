@@ -63,6 +63,7 @@ On the host: its Mods menu (F1), or `settings.ini` in the mod's data folder.
 | **The lobby** (`lobby_x`, `lobby_z`, `lobby_radius`) | 10600, -3600, 850: the sandbar where Gelato Beach puts its players (0, 0: wherever the stage puts them) |
 | **Players collide** (`collision`) | on (off: the host's own Player Collision setting) |
 | **Arena** (`area`, `episode`) | 4, 0: Gelato Beach. The middle is where the stage puts its players |
+| **Gelato Beach's music** (`stage_music`) | off: the beach is quiet between rounds, and a round has only Shadow Mario's chase |
 
 ## Running a server
 
@@ -97,4 +98,5 @@ The whole mod is [`src/splash_battle.c`](src/splash_battle.c): plain C against t
 - **The lobby:** a `BOUNDS` round the sandbar and `SMS_PLAYER_FLUDD` 0, sticky; at the line-up a `BOUNDS` round the arena before the `WARP`s, and at "Go!" `SMS_PLAYER_FLUDD` 1 and the water.
 - **Water as ammunition:** `SMS_RULE_NO_REFILL`, `SMS_PLAYER_WATER` at the start, `SMS_PLAYER_WATER_USE`, and the capsules: a `SPAWN` of `bottle_large` (a new id each time, sticky until taken, then unstuck and `OBJECT` `KILL`), `OBJECT` `SCALE` 0.6, at a spot on dry ground (`game->ground` on the server's own copy of the stage), judged taken from where the server hears each player is, `SMS_PLAYER_ADD_WATER` for whoever reached it.
 - **The start, lined up across the players:** at three seconds to go it sends `WARP` and `HOLD` now, and `HOLD` off, `RULES` with water hits, `TIMER`, the start's sound and the music with a `delay_ms` of the time left; `READY_GO` gets "Go!" there too.
+- **The stage's music off:** a command's `MUSIC` 0 stops only music a command started, so two seconds after a player arrives the mod sends them `MUSIC` with Gelato Beach's own (`MSD_BGM_MAMMA`, which the stage is already playing) and `MUSIC` 0 just after.
 - **Events:** `SMS_EV_NET_SESSION` (the arena loaded: set it up, the lobby), `SMS_EV_NET_PLAYER_SPLASHED` (a hit), `SMS_EV_NET_PLAYER_ARRIVED` (someone in the arena: mid-battle, they watch), `SMS_EV_NET_PLAYER_LEFT`, `SMS_EV_NET_PLAYER_JOINED` (a welcome), and `SMS_EV_FRAME` for the rest.

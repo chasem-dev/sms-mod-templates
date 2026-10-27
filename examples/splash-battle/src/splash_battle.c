@@ -48,6 +48,7 @@ static SmsMod* self;
 #define ENEMY_FIRST     0x10000001 /* the stage's enemies: out of the way */
 #define ENEMY_LAST      0x1000FFFF
 #define MUSIC_BATTLE    ((int32_t)0x80010016u) /* MSD_BGM_KAGEMARIO: Shadow Mario's chase */
+#define MUSIC_GELATO    ((int32_t)0x80010003u) /* MSD_BGM_MAMMA: Gelato Beach's own */
 #define SOUND_OUT       0x4823                 /* SMS_SOUND_DAMAGE */
 #define SOUND_START     0x4851                 /* a race's start */
 #define RING_RADIUS     700.0f                 /* the line-up's ring round the middle */
@@ -136,6 +137,7 @@ static double pickup_cooldown(void) { return api->config->get_int(self, "pickup_
 static double pickup_life(void) { return api->config->get_int(self, "pickup_life", PICKUP_LIFE); }
 static int collide_on(void) { return api->config->get_int(self, "collision", 1); }
 static int arena_area(void) { return api->config->get_int(self, "area", 4); }
+static int stage_music_on(void) { return api->config->get_int(self, "stage_music", 0); }
 /* the arena's middle on the map: on Gelato Beach's sand, its widest stretch
    (round it, 3800 units of beach and dunes, 800 from the sea); 0, 0: where
    the stage starts its players */
@@ -200,6 +202,18 @@ static void one(uint32_t to, uint32_t type, int32_t value, uint32_t delay_ms)
 	c.delay_ms = delay_ms;
 	c.i[0]     = value;
 	api->net->send(to, &c);
+}
+
+/* The stage's music off in a player's game, a moment after they arrive (the
+   stage starts it as they come in). A command stops only music a command
+   started, so it starts the stage's own (the same, playing on) and stops
+   that. Gelato Beach's: an arena elsewhere keeps its stage's music. */
+static void stage_music_off(uint32_t to)
+{
+	if (stage_music_on() || arena_area() != 4)
+		return;
+	one(to, SMS_CMD_MUSIC, MUSIC_GELATO, 2000);
+	one(to, SMS_CMD_MUSIC, 0, 2200);
 }
 
 /* What the players may do, kept for the session (newcomers get it too). */
@@ -1083,6 +1097,7 @@ static int on_arrived(SmsMod* mod, SmsEvent* ev, void* user)
 	(void)mod;
 	(void)user;
 	api->core->log(self, SMS_LOG_INFO, "%s (slot %d) in the arena (%s)", p->name, p->slot, kPhaseName[phase]);
+	stage_music_off(SMS_NET_SLOT(p->slot));
 	switch (phase) {
 	case COUNTDOWN:
 		timer(SMS_NET_SLOT(p->slot), SMS_TIMER_DOWN, ends - t > 0 ? ends - t : 0, 0);
@@ -1176,6 +1191,7 @@ SMS_MOD_EXTERN_C SMS_MOD_EXPORT int sms_mod_load(SmsMod* mod, const SmsApi* a)
 	add_option(SMS_OPTION_INT, "lobby_radius", "Lobby's edge (units)", 850, 200, 4000, 50);
 	add_option(SMS_OPTION_BOOL, "collision", "Players collide", 1, 0, 1, 1);
 	add_option(SMS_OPTION_INT, "area", "Arena (area)", 4, 1, 60, 1);
+	add_option(SMS_OPTION_BOOL, "stage_music", "Gelato Beach's music", 0, 0, 1, 1);
 	add_option(SMS_OPTION_INT, "episode", "Arena (episode)", 0, 0, 7, 1);
 	api->core->subscribe(mod, SMS_EV_FRAME, on_frame, NULL, SMS_PRIORITY_NORMAL);
 	api->core->subscribe(mod, SMS_EV_NET_SESSION, on_session, NULL, SMS_PRIORITY_NORMAL);
