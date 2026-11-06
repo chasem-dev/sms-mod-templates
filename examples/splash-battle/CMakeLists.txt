@@ -15,7 +15,7 @@ project(splash_battle C)
 include(FetchContent)
 FetchContent_Declare(sms_mod_sdk
   GIT_REPOSITORY https://github.com/chasem-dev/sms-mod-sdk.git
-  GIT_TAG v1.5.0
+  GIT_TAG v1.7.0
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(sms_mod_sdk)
 
